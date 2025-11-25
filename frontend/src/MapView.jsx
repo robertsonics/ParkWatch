@@ -3,14 +3,14 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 export default function MapView() {
-  const mapRef = useRef(null);   // DOM node for the map
-  const mapInstanceRef = useRef(null); // store Leaflet map instance
+  const mapRef = useRef<HTMLDivElement | null>(null);   // DOM node for the map
+  const mapInstanceRef = useRef<L.Map | null>(null);    // store Leaflet map instance
 
   useEffect(() => {
     if (mapInstanceRef.current) return; // don't reinitialize
 
     // Initialize the map
-    const map = L.map(mapRef.current).setView([27.5, -81.5], 6);
+    const map = L.map(mapRef.current as HTMLDivElement).setView([27.5, -81.5], 6);
     mapInstanceRef.current = map;
 
     // Base layers
@@ -34,7 +34,7 @@ export default function MapView() {
       .addTo(map);
 
     // Load GeoJSON from /public
-    fetch("/parks.geojson")
+    fetch("/FL_Parks_2025.geojson")
       .then((r) => r.json())
       .then((data) => {
         L.geoJSON(data, {
@@ -48,24 +48,35 @@ export default function MapView() {
             });
           },
           onEachFeature: function (feature, layer) {
-            const p = feature.properties;
+            const p: any = feature.properties || {};
+
+            // MH + RV spaces combined
+            const mhSpaces = p.mh_spaces ?? 0;
+            const rvSpaces = p.rv_spaces ?? 0;
+            const totalSpaces =
+              (typeof mhSpaces === "number" ? mhSpaces : Number(mhSpaces) || 0) +
+              (typeof rvSpaces === "number" ? rvSpaces : Number(rvSpaces) || 0);
+
             const popupContent = `
-              <b>${p.name}</b><br>
-              ${p.address}<br>
-              ${p.city}, FL ${p.zip}<br>
+              <b>${p.park_name ?? ""}</b><br>
+              ${p.park_address ?? ""}<br>
+              ${p.park_city ?? ""}, ${p.park_state ?? "FL"} ${p.park_zip ?? ""}<br>
               <br>
-              <b>County:</b> ${p.county}<br>
-              <b>Lots:</b> ${p.lots}<br>
-              <b>Status:</b> ${p.status}<br>
-              <b>Latitude:</b> ${p.latitude}<br>
-              <b>Longitude:</b> ${p.longitude}
+              <b>County:</b> ${p.county ?? ""}<br>
+              <b>MH Spaces:</b> ${p.mh_spaces ?? "N/A"}<br>
+              <b>RV Spaces:</b> ${p.rv_spaces ?? "N/A"}<br>
+              <b>Billing Spaces:</b> ${p.billing_spaces ?? "N/A"}<br>
+              <b>Total Spaces:</b> ${totalSpaces}<br>
+              <b>Latitude:</b> ${p.latitude ?? ""}<br>
+              <b>Longitude:</b> ${p.longitude ?? ""}<br>
+              <b>Geocode Status:</b> ${p.geocode_status ?? ""}<br>
             `;
             layer.bindPopup(popupContent);
           },
         }).addTo(map);
       })
       .catch((err) => {
-        console.error("Error loading parks.geojson:", err);
+        console.error("Error loading FL_Parks_2025.geojson:", err);
       });
   }, []);
 
