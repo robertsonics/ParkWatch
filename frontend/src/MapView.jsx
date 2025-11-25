@@ -3,21 +3,26 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 export default function MapView() {
-  const mapRef = useRef<HTMLDivElement | null>(null);   // DOM node for the map
-  const mapInstanceRef = useRef<L.Map | null>(null);    // store Leaflet map instance
+  const mapRef = useRef(null);        // DOM node for the map
+  const mapInstanceRef = useRef(null); // store Leaflet map instance
 
   useEffect(() => {
-    if (mapInstanceRef.current) return; // don't reinitialize
+    // Don't reinitialize the map
+    if (mapInstanceRef.current) return;
+    if (!mapRef.current) return;
 
     // Initialize the map
-    const map = L.map(mapRef.current as HTMLDivElement).setView([27.5, -81.5], 6);
+    const map = L.map(mapRef.current).setView([27.5, -81.5], 6);
     mapInstanceRef.current = map;
 
     // Base layers
-    const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "&copy; OpenStreetMap contributors",
-    }).addTo(map);
+    const osm = L.tileLayer(
+      "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      {
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap contributors",
+      }
+    ).addTo(map);
 
     const esriSat = L.tileLayer(
       "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
@@ -48,14 +53,22 @@ export default function MapView() {
             });
           },
           onEachFeature: function (feature, layer) {
-            const p: any = feature.properties || {};
+            const p = (feature && feature.properties) || {};
 
-            // MH + RV spaces combined
-            const mhSpaces = p.mh_spaces ?? 0;
-            const rvSpaces = p.rv_spaces ?? 0;
-            const totalSpaces =
-              (typeof mhSpaces === "number" ? mhSpaces : Number(mhSpaces) || 0) +
-              (typeof rvSpaces === "number" ? rvSpaces : Number(rvSpaces) || 0);
+            const mhSpacesRaw = p.mh_spaces ?? 0;
+            const rvSpacesRaw = p.rv_spaces ?? 0;
+
+            const mhSpaces =
+              typeof mhSpacesRaw === "number"
+                ? mhSpacesRaw
+                : Number(String(mhSpacesRaw).replace(/,/g, "")) || 0;
+
+            const rvSpaces =
+              typeof rvSpacesRaw === "number"
+                ? rvSpacesRaw
+                : Number(String(rvSpacesRaw).replace(/,/g, "")) || 0;
+
+            const totalSpaces = mhSpaces + rvSpaces;
 
             const popupContent = `
               <b>${p.park_name ?? ""}</b><br>
