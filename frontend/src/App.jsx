@@ -1,16 +1,30 @@
 // src/App.jsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import MapView from "./MapView";
 import "./App.css";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
+// Helper: consistent ID for each park
+function getParkId(feature) {
+  const p = feature?.properties || {};
+  return (
+    p.permit ??                   // primary
+    p.Permit ??                   // fallback
+    `${p.park_name ?? ""}|${p.park_address ?? ""}` // final fallback
+  );
+}
+
 function App() {
-  const [parks, setParks] = useState([]);       // array of GeoJSON features
+  const [parks, setParks] = useState([]);
   const [selectedPark, setSelectedPark] = useState(null);
-  const [sortMode, setSortMode] = useState("alpha"); // "alpha" or "risk" (stub for now)
+  const [sortMode, setSortMode] = useState("alpha");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [selectionSource, setSelectionSource] = useState(null); // "map" | "list" | null
+
+  // refs to each list item: { [id]: HTMLElement }
+  const itemRefs = useRef({});
 
   // Fetch parks from backend once
   useEffect(() => {
@@ -33,7 +47,7 @@ function App() {
         setParks(features);
 
         if (features.length > 0) {
-          setSelectedPark(features[0]); // default selection
+          setSelectedPark(features[0]);
         }
       } catch (err) {
         console.error(err);
@@ -46,19 +60,17 @@ function App() {
     fetchParks();
   }, []);
 
-  // Sort parks for list panel
+  // Sort parks for list
   const sortedParks = useMemo(() => {
     const copy = [...parks];
 
     if (sortMode === "risk") {
-      // Placeholder – wire up when you add a risk field
       copy.sort((a, b) => {
         const ra = a.properties?.risk_score ?? 0;
         const rb = b.properties?.risk_score ?? 0;
-        return rb - ra; // high risk first
+        return rb - ra;
       });
     } else {
-      // Alphabetical by name
       copy.sort((a, b) => {
         const nameA = (a.properties?.park_name ?? "").toLowerCase();
         const nameB = (b.properties?.park_name ?? "").toLowerCase();
@@ -69,10 +81,25 @@ function App() {
     return copy;
   }, [parks, sortMode]);
 
-  // Unified selection handler – used by both map and list
-  function handleSelectPark(feature) {
+  // Unified selection handler; source = "map" or "list"
+  function handleSelectPark(feature, source) {
     setSelectedPark(feature);
+    setSelectionSource(source);
   }
+
+  // When selection came from MAP, scroll list so that item is at top
+  useEffect(() => {
+    if (!selectedPark || selectionSource !== "map") return;
+
+    const id = getParkId(selectedPark);
+    const el = itemRefs.current[id];
+    if (el && el.scrollIntoView) {
+      el.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
+
+    // reset so we don't re-scroll on unrelated renders
+    setSelectionSource(null);
+  }, [selectedPark, selectionSource]);
 
   return (
     <div className="app-layout">
@@ -82,11 +109,15 @@ function App() {
         {error && <div className="panel-error">{error}</div>}
 
         {!loading && !error && (
-          <MapView parks={parks} onSelectPark={handleSelectPark} />
+          <MapView
+            parks={parks}
+            selectedPark={selectedPark}
+            onSelectPark={(feature) => handleSelectPark(feature, "map")}
+          />
         )}
       </div>
 
-      {/* RIGHT-TOP: scrollable sorted list */}
+      {/* RIGHT-TOP: park list */}
       <div className="panel list-panel">
         <div className="panel-header">
           <h2>Parks</h2>
@@ -108,20 +139,24 @@ function App() {
         </div>
 
         <div className="park-list">
-          {sortedParks.map((feature, index) => {
+          {sortedParks.map((feature) => {
             const p = feature.properties ?? {};
             const name = p.park_name ?? "Unnamed park";
+            const id = getParkId(feature);
+            const isSelected =
+              selectedPark && getParkId(selectedPark) === id;
 
-            const isSelected = selectedPark === feature; // object identity
-
-            // Placeholder risk field – safe even if not present
             const risk = p.risk_score ?? p.overall_risk ?? null;
 
             return (
               <div
-                key={p.permit ?? index}
+                key={id}
+                ref={(el) => {
+                  if (el) itemRefs.current[id] = el;
+                  else delete itemRefs.current[id];
+                }}
                 className={`park-list-item ${isSelected ? "selected" : ""}`}
-                onClick={() => handleSelectPark(feature)}
+                onClick={() => handleSelectPark(feature, "list")}
               >
                 <div className="park-list-name">{name}</div>
                 {risk != null && (
@@ -139,7 +174,7 @@ function App() {
         </div>
       </div>
 
-      {/* RIGHT-BOTTOM: details of selected park */}
+      {/* RIGHT-BOTTOM: details */}
       <div className="panel detail-panel">
         <div className="panel-header">
           <h2>Park Details</h2>
@@ -147,7 +182,6 @@ function App() {
 
         <div className="park-details">
           {!selectedPark && <div>Select a park from the map or list.</div>}
-
           {selectedPark && <ParkDetailCard feature={selectedPark} />}
         </div>
       </div>
@@ -155,7 +189,6 @@ function App() {
   );
 }
 
-// Detail card – uses your existing field names
 function ParkDetailCard({ feature }) {
   const p = feature.properties ?? {};
 
@@ -186,7 +219,7 @@ function ParkDetailCard({ feature }) {
   const lat = p.latitude ?? "";
   const lon = p.longitude ?? "";
 
-  const risk = p.risk_score ?? p.overall_risk; // placeholder
+  const risk = p.risk_score ?? p.overall_risk;
 
   return (
     <div className="park-detail-card">

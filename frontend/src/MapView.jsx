@@ -3,10 +3,10 @@ import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-export default function MapView({ parks, onSelectPark }) {
-  const mapRef = useRef(null);           // DOM node for the map
-  const mapInstanceRef = useRef(null);   // Leaflet map instance
-  const geoJsonLayerRef = useRef(null);  // current GeoJSON layer
+export default function MapView({ parks, selectedPark, onSelectPark }) {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const geoJsonLayerRef = useRef(null);
 
   // One-time map initialization
   useEffect(() => {
@@ -15,6 +15,7 @@ export default function MapView({ parks, onSelectPark }) {
     const map = L.map(mapRef.current).setView([27.5, -81.5], 6);
     mapInstanceRef.current = map;
 
+    // Use whatever basemap(s) you currently have configured
     const osm = L.tileLayer(
       "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
       {
@@ -38,12 +39,11 @@ export default function MapView({ parks, onSelectPark }) {
       .addTo(map);
   }, []);
 
-  // Build/update GeoJSON layer whenever parks change
+  // Build/update GeoJSON layer when parks change
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
 
-    // Remove previous layer if it exists
     if (geoJsonLayerRef.current) {
       map.removeLayer(geoJsonLayerRef.current);
       geoJsonLayerRef.current = null;
@@ -59,9 +59,9 @@ export default function MapView({ parks, onSelectPark }) {
     const geoJsonLayer = L.geoJSON(featureCollection, {
       pointToLayer: (feature, latlng) =>
         L.circleMarker(latlng, {
-          radius: 4,
-          fillColor: "#007bff", // blue fill
-          color: "#003f88",     // darker outline
+          radius: 5,
+          fillColor: "#4dd0e1", // bright for dark theme
+          color: "#26c6da",
           weight: 1,
           fillOpacity: 1,
         }),
@@ -99,7 +99,7 @@ export default function MapView({ parks, onSelectPark }) {
         `;
         layer.bindPopup(popupContent);
 
-        // Notify parent when marker is clicked
+        // When marker clicked, notify parent so it can update list + details
         layer.on("click", () => {
           if (onSelectPark) onSelectPark(feature);
         });
@@ -109,6 +109,18 @@ export default function MapView({ parks, onSelectPark }) {
     geoJsonLayerRef.current = geoJsonLayer;
     geoJsonLayer.addTo(map);
   }, [parks, onSelectPark]);
+
+  // When selectedPark changes (e.g. from list click), zoom to it
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !selectedPark) return;
+
+    const coords = selectedPark.geometry?.coordinates;
+    if (!coords || coords.length < 2) return;
+
+    const [lon, lat] = coords; // GeoJSON order: [lon, lat]
+    map.flyTo([lat, lon], 12); // tweak zoom level as desired
+  }, [selectedPark]);
 
   return (
     <div
