@@ -62,6 +62,7 @@ body,
 /* Panel headers */
 .panel-header {
   padding: 0.5rem 0.75rem;
+  background: #2d2d2d;
   border-bottom: 1px solid #e0e0e0;
   display: flex;
   align-items: center;
@@ -71,6 +72,7 @@ body,
 .panel-header h2 {
   font-size: 1rem;
   margin: 0;
+  color: #eaeaea;
 }
 
 .panel-loading,

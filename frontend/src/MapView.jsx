@@ -3,10 +3,21 @@ import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
+// Consistent ID for each park (same logic as in App)
+function getParkId(feature) {
+  const p = feature?.properties || {};
+  return (
+    p.permit ??                   // preferred
+    p.Permit ??                   // fallback
+    `${p.park_name ?? ""}|${p.park_address ?? ""}` // last resort
+  );
+}
+
 export default function MapView({ parks, selectedPark, onSelectPark }) {
-  const mapRef = useRef(null);
-  const mapInstanceRef = useRef(null);
-  const geoJsonLayerRef = useRef(null);
+  const mapRef = useRef(null);            // DOM node for the map
+  const mapInstanceRef = useRef(null);    // Leaflet map instance
+  const geoJsonLayerRef = useRef(null);   // current GeoJSON layer
+  const markerRefs = useRef({});          // { [id]: markerInstance }
 
   // One-time map initialization
   useEffect(() => {
@@ -15,7 +26,7 @@ export default function MapView({ parks, selectedPark, onSelectPark }) {
     const map = L.map(mapRef.current).setView([27.5, -81.5], 6);
     mapInstanceRef.current = map;
 
-    // Use whatever basemap(s) you currently have configured
+    // Base layers (you can swap this to a dark basemap if you like)
     const osm = L.tileLayer(
       "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
       {
@@ -39,15 +50,19 @@ export default function MapView({ parks, selectedPark, onSelectPark }) {
       .addTo(map);
   }, []);
 
-  // Build/update GeoJSON layer when parks change
+  // Build/update GeoJSON layer whenever parks change
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
 
+    // Remove previous layer if it exists
     if (geoJsonLayerRef.current) {
       map.removeLayer(geoJsonLayerRef.current);
       geoJsonLayerRef.current = null;
     }
+
+    // Clear marker ref map
+    markerRefs.current = {};
 
     if (!parks || parks.length === 0) return;
 
@@ -57,14 +72,21 @@ export default function MapView({ parks, selectedPark, onSelectPark }) {
     };
 
     const geoJsonLayer = L.geoJSON(featureCollection, {
-      pointToLayer: (feature, latlng) =>
-        L.circleMarker(latlng, {
+      pointToLayer: (feature, latlng) => {
+        const marker = L.circleMarker(latlng, {
           radius: 5,
-          fillColor: "#4dd0e1", // bright for dark theme
+          fillColor: "#4dd0e1", // default style (good on dark theme)
           color: "#26c6da",
           weight: 1,
           fillOpacity: 1,
-        }),
+        });
+
+        // Store reference for later highlighting
+        const id = getParkId(feature);
+        markerRefs.current[id] = marker;
+
+        return marker;
+      },
       onEachFeature: (feature, layer) => {
         const p = (feature && feature.properties) || {};
 
@@ -99,7 +121,7 @@ export default function MapView({ parks, selectedPark, onSelectPark }) {
         `;
         layer.bindPopup(popupContent);
 
-        // When marker clicked, notify parent so it can update list + details
+        // When marker is clicked, notify parent so it can update list + details
         layer.on("click", () => {
           if (onSelectPark) onSelectPark(feature);
         });
@@ -110,16 +132,45 @@ export default function MapView({ parks, selectedPark, onSelectPark }) {
     geoJsonLayer.addTo(map);
   }, [parks, onSelectPark]);
 
-  // When selectedPark changes (e.g. from list click), zoom to it
+  // When selectedPark changes:
+  //  - zoom/fly to it
+  //  - highlight its marker (bigger + yellow)
+  //  - reset others to default
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || !selectedPark) return;
 
     const coords = selectedPark.geometry?.coordinates;
-    if (!coords || coords.length < 2) return;
+    if (coords && coords.length >= 2) {
+      const [lon, lat] = coords; // GeoJSON: [lon, lat]
+      map.flyTo([lat, lon], 12); // tweak zoom level to taste
+    }
 
-    const [lon, lat] = coords; // GeoJSON order: [lon, lat]
-    map.flyTo([lat, lon], 12); // tweak zoom level as desired
+    const selectedId = getParkId(selectedPark);
+
+    // Reset all markers to default style
+    Object.values(markerRefs.current).forEach((marker) => {
+      marker.setStyle({
+        radius: 5,
+        fillColor: "#4dd0e1",
+        color: "#26c6da",
+        weight: 1,
+        fillOpacity: 1,
+      });
+    });
+
+    // Highlight selected marker
+    const selectedMarker = markerRefs.current[selectedId];
+    if (selectedMarker) {
+      selectedMarker.setStyle({
+        radius: 8,
+        fillColor: "#ffeb3b", // bright yellow
+        color: "#fdd835",
+        weight: 2,
+        fillOpacity: 1,
+      });
+      selectedMarker.bringToFront();
+    }
   }, [selectedPark]);
 
   return (
