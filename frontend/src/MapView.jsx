@@ -38,10 +38,24 @@ export default function MapView() {
       )
       .addTo(map);
 
-    // Load GeoJSON from /public
-    fetch("/FL_Parks_2025.geojson")
-      .then((r) => r.json())
+    // 👉 Backend base URL from Vite env
+    const apiBase = import.meta.env.VITE_API_BASE_URL;
+    if (!apiBase) {
+      console.error("VITE_API_BASE_URL is not defined. Check your .env and Vercel env vars.");
+      return;
+    }
+
+    // Load GeoJSON from backend API instead of static file
+    fetch(`${apiBase}/parks`)
+      .then((r) => {
+        if (!r.ok) {
+          throw new Error(`HTTP ${r.status} loading ${apiBase}/parks`);
+        }
+        return r.json();
+      })
       .then((data) => {
+        console.log("Loaded parks GeoJSON from backend:", data);
+
         L.geoJSON(data, {
           pointToLayer: function (feature, latlng) {
             return L.circleMarker(latlng, {
@@ -89,7 +103,7 @@ export default function MapView() {
         }).addTo(map);
       })
       .catch((err) => {
-        console.error("Error loading FL_Parks_2025.geojson:", err);
+        console.error("Error loading parks from backend:", err);
       });
   }, []);
 
