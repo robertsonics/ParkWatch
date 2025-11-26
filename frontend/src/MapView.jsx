@@ -38,7 +38,7 @@ export default function MapView({ parks, onSelectPark }) {
       .addTo(map);
   }, []);
 
-  // Whenever parks change, rebuild the GeoJSON layer
+  // Build/update GeoJSON layer whenever parks change
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -51,23 +51,21 @@ export default function MapView({ parks, onSelectPark }) {
 
     if (!parks || parks.length === 0) return;
 
-    // Wrap features into a FeatureCollection
     const featureCollection = {
       type: "FeatureCollection",
       features: parks,
     };
 
     const geoJsonLayer = L.geoJSON(featureCollection, {
-      pointToLayer: function (feature, latlng) {
-        return L.circleMarker(latlng, {
+      pointToLayer: (feature, latlng) =>
+        L.circleMarker(latlng, {
           radius: 4,
           fillColor: "#007bff", // blue fill
           color: "#003f88",     // darker outline
           weight: 1,
           fillOpacity: 1,
-        });
-      },
-      onEachFeature: function (feature, layer) {
+        }),
+      onEachFeature: (feature, layer) => {
         const p = (feature && feature.properties) || {};
 
         const mhSpacesRaw = p.mh_spaces ?? 0;
@@ -91,7 +89,7 @@ export default function MapView({ parks, onSelectPark }) {
           ${p.park_city ?? ""}, ${p.park_state ?? "FL"} ${p.park_zip ?? ""}<br>
           <br>
           <b>County:</b> ${p.county ?? ""}<br>
-          <b>MH Spaces:</b ${p.mh_spaces ?? "N/A"}<br>
+          <b>MH Spaces:</b> ${p.mh_spaces ?? "N/A"}<br>
           <b>RV Spaces:</b> ${p.rv_spaces ?? "N/A"}<br>
           <b>Billing Spaces:</b> ${p.billing_spaces ?? "N/A"}<br>
           <b>Total Spaces:</b> ${totalSpaces}<br>
@@ -101,11 +99,9 @@ export default function MapView({ parks, onSelectPark }) {
         `;
         layer.bindPopup(popupContent);
 
-        // When marker is clicked, notify parent so it can update list + details
+        // Notify parent when marker is clicked
         layer.on("click", () => {
-          if (onSelectPark) {
-            onSelectPark(feature);
-          }
+          if (onSelectPark) onSelectPark(feature);
         });
       },
     });
@@ -114,5 +110,11 @@ export default function MapView({ parks, onSelectPark }) {
     geoJsonLayer.addTo(map);
   }, [parks, onSelectPark]);
 
-  return <div ref={mapRef} className="map-container" />;
+  return (
+    <div
+      ref={mapRef}
+      className="map-container"
+      style={{ width: "100%", height: "100%" }}
+    />
+  );
 }
