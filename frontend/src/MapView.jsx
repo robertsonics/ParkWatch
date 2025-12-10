@@ -7,17 +7,16 @@ import "leaflet/dist/leaflet.css";
 function getParkId(feature) {
   const p = feature?.properties || {};
   return (
-    p.permit ??                   // preferred
-    p.Permit ??                   // fallback
+    p.permit ?? // preferred
     `${p.park_name ?? ""}|${p.park_address ?? ""}` // last resort
   );
 }
 
 export default function MapView({ parks, selectedPark, onSelectPark }) {
-  const mapRef = useRef(null);            // DOM node for the map
-  const mapInstanceRef = useRef(null);    // Leaflet map instance
-  const geoJsonLayerRef = useRef(null);   // current GeoJSON layer
-  const markerRefs = useRef({});          // { [id]: markerInstance }
+  const mapRef = useRef(null); // DOM node for the map
+  const mapInstanceRef = useRef(null); // Leaflet map instance
+  const geoJsonLayerRef = useRef(null); // current GeoJSON layer
+  const markerRefs = useRef({}); // { [id]: markerInstance }
 
   // One-time map initialization
   useEffect(() => {
@@ -26,7 +25,7 @@ export default function MapView({ parks, selectedPark, onSelectPark }) {
     const map = L.map(mapRef.current).setView([27.5, -81.5], 6);
     mapInstanceRef.current = map;
 
-    // Base layers (you can swap this to a dark basemap if you like)
+    // Base layers
     const osm = L.tileLayer(
       "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
       {
@@ -75,7 +74,7 @@ export default function MapView({ parks, selectedPark, onSelectPark }) {
       pointToLayer: (feature, latlng) => {
         const marker = L.circleMarker(latlng, {
           radius: 5,
-          fillColor: "#4dd0e1", // default style (good on dark theme)
+          fillColor: "#4dd0e1", // default style
           color: "#26c6da",
           weight: 1,
           fillOpacity: 1,
@@ -108,7 +107,9 @@ export default function MapView({ parks, selectedPark, onSelectPark }) {
         const popupContent = `
           <b>${p.park_name ?? ""}</b><br>
           ${p.park_address ?? ""}<br>
-          ${p.park_city ?? ""}, ${p.park_state ?? "FL"} ${p.park_zip ?? ""}<br>
+          ${p.park_city ?? ""}, ${p.park_state ?? "FL"} ${
+          p.park_zip ?? ""
+        }<br>
           <br>
           <b>County:</b> ${p.county ?? ""}<br>
           <b>MH Spaces:</b> ${p.mh_spaces ?? "N/A"}<br>
@@ -132,10 +133,7 @@ export default function MapView({ parks, selectedPark, onSelectPark }) {
     geoJsonLayer.addTo(map);
   }, [parks, onSelectPark]);
 
-  // When selectedPark changes:
-  //  - zoom/fly to it
-  //  - highlight its marker (bigger + yellow)
-  //  - reset others to default
+  // When selectedPark changes: zoom/fly and highlight marker
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || !selectedPark) return;
@@ -143,7 +141,7 @@ export default function MapView({ parks, selectedPark, onSelectPark }) {
     const coords = selectedPark.geometry?.coordinates;
     if (coords && coords.length >= 2) {
       const [lon, lat] = coords; // GeoJSON: [lon, lat]
-      map.flyTo([lat, lon], 12); // tweak zoom level to taste
+      map.flyTo([lat, lon], 12);
     }
 
     const selectedId = getParkId(selectedPark);

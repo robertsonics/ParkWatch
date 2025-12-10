@@ -2,16 +2,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import MapView from "./MapView";
 import "./App.css";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+import { supabase } from "./supabaseClient";
 
 // Helper: consistent ID for each park
 function getParkId(feature) {
   const p = feature?.properties || {};
   return (
-    p.permit ??                   // primary
-    p.Permit ??                   // fallback
-    `${p.park_name ?? ""}|${p.park_address ?? ""}` // final fallback
+    p.permit ?? // primary
+    `${p.park_name ?? ""}|${p.park_address ?? ""}` // fallback
   );
 }
 
@@ -26,24 +24,65 @@ function App() {
   // refs to each list item: { [id]: HTMLElement }
   const itemRefs = useRef({});
 
-  // Fetch parks from backend once
+  // Fetch parks from Supabase once
   useEffect(() => {
     async function fetchParks() {
       try {
-        if (!API_BASE_URL) {
-          throw new Error("VITE_API_BASE_URL is not defined");
-        }
-
         setLoading(true);
         setError(null);
 
-        const res = await fetch(`${API_BASE_URL}/parks`);
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status} loading ${API_BASE_URL}/parks`);
-        }
+        const { data, error } = await supabase
+          .from("fl_parks")
+          .select(`
+            permit,
+            county,
+            park_name,
+            park_address,
+            park_city,
+            park_state,
+            park_zip,
+            phone,
+            owner_co,
+            owner_first,
+            owner_last,
+            owner_address,
+            owner_city,
+            owner_state,
+            owner_zip,
+            mail_address,
+            mail_city,
+            mail_state,
+            mail_zip,
+            park_type,
+            mh_spaces,
+            rv_spaces,
+            billing_spaces,
+            latitude,
+            longitude,
+            geocode_status
+          `);
 
-        const data = await res.json();
-        const features = data?.features ?? [];
+        if (error) throw error;
+
+        const features =
+          (data || [])
+            .filter(
+              (row) =>
+                row.latitude !== null &&
+                row.latitude !== undefined &&
+                row.longitude !== null &&
+                row.longitude !== undefined
+            )
+            .map((row) => ({
+              type: "Feature",
+              geometry: {
+                type: "Point",
+                // GeoJSON: [lon, lat]
+                coordinates: [Number(row.longitude), Number(row.latitude)],
+              },
+              properties: row,
+            })) ?? [];
+
         setParks(features);
 
         if (features.length > 0) {
@@ -51,7 +90,7 @@ function App() {
         }
       } catch (err) {
         console.error(err);
-        setError("Failed to load parks.");
+        setError("Failed to load parks from Supabase.");
       } finally {
         setLoading(false);
       }
@@ -66,8 +105,8 @@ function App() {
 
     if (sortMode === "risk") {
       copy.sort((a, b) => {
-        const ra = a.properties?.risk_score ?? 0;
-        const rb = b.properties?.risk_score ?? 0;
+        const ra = a.properties?.risk_score ?? a.properties?.overall_risk ?? 0;
+        const rb = b.properties?.risk_score ?? b.properties?.overall_risk ?? 0;
         return rb - ra;
       });
     } else {
@@ -276,3 +315,4 @@ function ParkDetailCard({ feature }) {
 }
 
 export default App;
+
