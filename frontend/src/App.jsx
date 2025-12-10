@@ -60,28 +60,27 @@ function App() {
             latitude,
             longitude,
             geocode_status
-          `);
+          `)
+          .range(0, 9999);   // <-- FIX: fetch all rows (removes 1000-row cap)
+
+        console.log("Supabase fl_parks data:", data);
+        console.log("Supabase fl_parks error:", error);
 
         if (error) throw error;
 
         const features =
-          (data || [])
-            .filter(
-              (row) =>
-                row.latitude !== null &&
-                row.latitude !== undefined &&
-                row.longitude !== null &&
-                row.longitude !== undefined
-            )
-            .map((row) => ({
-              type: "Feature",
-              geometry: {
-                type: "Point",
-                // GeoJSON: [lon, lat]
-                coordinates: [Number(row.longitude), Number(row.latitude)],
-              },
-              properties: row,
-            })) ?? [];
+          (data || []).map((row) => ({
+            type: "Feature",
+            geometry: {
+              type: "Point",
+              // GeoJSON uses [lon, lat]
+              coordinates: [
+                row.longitude != null ? Number(row.longitude) : null,
+                row.latitude != null ? Number(row.latitude) : null,
+              ],
+            },
+            properties: row,
+          })) ?? [];
 
         setParks(features);
 
@@ -89,7 +88,7 @@ function App() {
           setSelectedPark(features[0]);
         }
       } catch (err) {
-        console.error(err);
+        console.error("Error loading parks from Supabase:", err);
         setError("Failed to load parks from Supabase.");
       } finally {
         setLoading(false);
@@ -126,7 +125,7 @@ function App() {
     setSelectionSource(source);
   }
 
-  // When selection came from MAP, scroll list so that item is at top
+  // When a marker selects a park, scroll list to that park
   useEffect(() => {
     if (!selectedPark || selectionSource !== "map") return;
 
@@ -136,7 +135,7 @@ function App() {
       el.scrollIntoView({ block: "start", behavior: "smooth" });
     }
 
-    // reset so we don't re-scroll on unrelated renders
+    // reset to avoid re-triggering on rerenders
     setSelectionSource(null);
   }, [selectedPark, selectionSource]);
 
@@ -315,4 +314,3 @@ function ParkDetailCard({ feature }) {
 }
 
 export default App;
-
