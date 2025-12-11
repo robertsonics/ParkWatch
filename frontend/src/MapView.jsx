@@ -17,7 +17,7 @@ export default function MapView({ parks, selectedPark, onSelectPark }) {
   const mapInstanceRef = useRef(null); // Leaflet map instance
   const geoJsonLayerRef = useRef(null); // current GeoJSON layer
   const markerRefs = useRef({}); // { [id]: markerInstance }
-  const firstSelectionRef = useRef(true); // NEW: track initial selection
+  const initialFirstParkIdRef = useRef(null); // NEW: remember first park id
 
   // One-time map initialization
   useEffect(() => {
@@ -65,6 +65,11 @@ export default function MapView({ parks, selectedPark, onSelectPark }) {
     markerRefs.current = {};
 
     if (!parks || parks.length === 0) return;
+
+    // NEW: remember the "first park" id for this dataset
+    if (!initialFirstParkIdRef.current && parks[0]) {
+      initialFirstParkIdRef.current = getParkId(parks[0]);
+    }
 
     const featureCollection = {
       type: "FeatureCollection",
@@ -139,17 +144,18 @@ export default function MapView({ parks, selectedPark, onSelectPark }) {
     const map = mapInstanceRef.current;
     if (!map || !selectedPark) return;
 
+    const selectedId = getParkId(selectedPark);
     const coords = selectedPark.geometry?.coordinates;
 
-    // Skip flyTo on the very first selection (initial load)
-    if (firstSelectionRef.current) {
-      firstSelectionRef.current = false;
-    } else if (coords && coords.length >= 2) {
+    // ONLY flyTo if this is NOT the initially selected first park
+    if (
+      coords &&
+      coords.length >= 2 &&
+      selectedId !== initialFirstParkIdRef.current
+    ) {
       const [lon, lat] = coords; // GeoJSON: [lon, lat]
       map.flyTo([lat, lon], 12);
     }
-
-    const selectedId = getParkId(selectedPark);
 
     // Reset all markers to default style
     Object.values(markerRefs.current).forEach((marker) => {
