@@ -17,6 +17,7 @@ export default function MapView({ parks, selectedPark, onSelectPark }) {
   const mapInstanceRef = useRef(null); // Leaflet map instance
   const geoJsonLayerRef = useRef(null); // current GeoJSON layer
   const markerRefs = useRef({}); // { [id]: markerInstance }
+  const firstSelectionRef = useRef(true); // NEW: track initial selection
 
   // One-time map initialization
   useEffect(() => {
@@ -139,7 +140,11 @@ export default function MapView({ parks, selectedPark, onSelectPark }) {
     if (!map || !selectedPark) return;
 
     const coords = selectedPark.geometry?.coordinates;
-    if (coords && coords.length >= 2) {
+
+    // Skip flyTo on the very first selection (initial load)
+    if (firstSelectionRef.current) {
+      firstSelectionRef.current = false;
+    } else if (coords && coords.length >= 2) {
       const [lon, lat] = coords; // GeoJSON: [lon, lat]
       map.flyTo([lat, lon], 12);
     }
