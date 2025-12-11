@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import MapView from "./MapView";
 import "./App.css";
-import { supabase } from "./supabaseClient";
+import { sql } from "./neonClient"; // NEW: Neon client
 
 // Helper: consistent ID for each park
 function getParkId(feature) {
@@ -24,16 +24,16 @@ function App() {
   // refs to each list item: { [id]: HTMLElement }
   const itemRefs = useRef({});
 
-  // Fetch parks from Supabase once
+  // Fetch parks from Neon once
   useEffect(() => {
     async function fetchParks() {
       try {
         setLoading(true);
         setError(null);
 
-        const { data, error } = await supabase
-          .from("fl_parks")
-          .select(`
+        // Neon query: select the same columns from fl_parks
+        const rows = await sql`
+          SELECT
             permit,
             county,
             park_name,
@@ -60,16 +60,15 @@ function App() {
             latitude,
             longitude,
             geocode_status
-          `)
-          .range(0, 9999);   // <-- FIX: fetch all rows (removes 1000-row cap)
+          FROM fl_parks
+          WHERE latitude IS NOT NULL
+            AND longitude IS NOT NULL;
+        `;
 
-        console.log("Supabase fl_parks data:", data);
-        console.log("Supabase fl_parks error:", error);
-
-        if (error) throw error;
+        console.log("Neon fl_parks rows:", rows);
 
         const features =
-          (data || []).map((row) => ({
+          (rows || []).map((row) => ({
             type: "Feature",
             geometry: {
               type: "Point",
@@ -88,8 +87,8 @@ function App() {
           setSelectedPark(features[0]);
         }
       } catch (err) {
-        console.error("Error loading parks from Supabase:", err);
-        setError("Failed to load parks from Supabase.");
+        console.error("Error loading parks from Neon:", err);
+        setError("Failed to load parks from database.");
       } finally {
         setLoading(false);
       }
