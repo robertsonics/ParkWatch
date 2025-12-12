@@ -26,8 +26,8 @@ function getParkId(p) {
 function floodTier(flood_risk) {
   const r = Number(flood_risk);
   if (!Number.isFinite(r)) return "yellow"; // unknown -> caution
-  if (r >= 7) return "red";
-  if (r >= 4) return "yellow";
+  if (r >= 3) return "red";
+  if (r >= 2) return "yellow";
   return "green";
 }
 
