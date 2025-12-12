@@ -1,156 +1,238 @@
-/* src/App.css */
+/* src/App.css
+ *
+ * Dark, modern UI with muted (but obvious) headers.
+ * Layout: Map on the left; list + details stacked on the right.
+ */
 
-html,
-body,
-#root {
+:root {
+  --bg: #0b1220;
+  --panel: rgba(17, 24, 39, 0.78);
+  --panelHeader: rgba(2, 6, 23, 0.42);
+  --border: rgba(148, 163, 184, 0.18);
+  --text: rgba(226, 232, 240, 0.92);
+  --muted: rgba(226, 232, 240, 0.62);
+  --shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+
+  --green: #22c55e;
+  --yellow: #eab308;
+  --red: #ef4444;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
   height: 100%;
   margin: 0;
-  padding: 0;
 }
 
-/* Overall 3-panel layout */
-.app-layout {
-  display: grid;
-  grid-template-columns: 2fr 1fr;  /* map : side panels */
-  grid-template-rows: 1fr 1fr;     /* right column split in half */
-  height: 100vh;
-  width: 100vw;
-  overflow: hidden;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+body {
+  background:
+    radial-gradient(1200px 700px at 10% 0%, rgba(59, 130, 246, 0.12), transparent 55%),
+    radial-gradient(900px 600px at 85% 15%, rgba(16, 185, 129, 0.08), transparent 55%),
+    var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
 }
 
-/* Allow grid items to shrink within rows */
-.map-panel,
-.list-panel,
-.detail-panel {
-  min-height: 0;
-}
-
-/* Generic panel styling */
-.panel {
-  border: 1px solid #e0e0e0;
-  box-sizing: border-box;
+/* Top bar */
+.pw-root {
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
 
-/* Map spans both rows on the left */
-.map-panel {
-  grid-column: 1 / 2;
-  grid-row: 1 / 3;
+.pw-topbar {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(2, 6, 23, 0.55);
+  backdrop-filter: blur(10px);
 }
 
-/* Map container fills the map panel */
-.map-container {
+.pw-title {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+.pw-subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Main grid layout */
+.pw-grid {
   flex: 1;
-  width: 100%;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+
+  grid-template-columns: 1.7fr 1fr;
+  grid-template-rows: 1fr 0.85fr;
+  grid-template-areas:
+    "map list"
+    "map detail";
+
+  min-height: 0; /* important for nested scroll areas */
+}
+
+/* Panels */
+.pw-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+  min-height: 0;
+}
+
+.pw-panelHeader {
+  padding: 10px 12px;
+  font-size: 12px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  background: var(--panelHeader);
+}
+
+.pw-map { grid-area: map; }
+.pw-list { grid-area: list; display: flex; flex-direction: column; }
+.pw-detail { grid-area: detail; display: flex; flex-direction: column; }
+
+/* Status / messages */
+.pw-status {
+  padding: 14px;
+  color: var(--muted);
+}
+
+.pw-error {
+  color: rgba(248, 113, 113, 0.95);
+}
+
+.pw-empty {
+  padding: 14px;
+  color: var(--muted);
+}
+
+/* Map sizing */
+.pw-mapWrap {
+  height: calc(100% - 41px); /* subtract panel header height */
+}
+
+.pw-leaflet {
   height: 100%;
+  width: 100%;
 }
 
-/* Right-top: list */
-.list-panel {
-  grid-column: 2 / 3;
-  grid-row: 1 / 2;
+/* List */
+.pw-listBody {
+  overflow: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-/* Right-bottom: details */
-.detail-panel {
-  grid-column: 2 / 3;
-  grid-row: 2 / 3;
-}
+.pw-row {
+  width: 100%;
+  text-align: left;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(2, 6, 23, 0.35);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 10px 10px;
+  cursor: pointer;
 
-/* Panel headers */
-.panel-header {
-  padding: 0.5rem 0.75rem;
-  background: #2d2d2d;
-  border-bottom: 1px solid #e0e0e0;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
+
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
 }
 
-.panel-header h2 {
-  font-size: 1rem;
-  margin: 0;
-  color: #eaeaea;
+.pw-row:hover {
+  transform: translateY(-1px);
+  border-color: rgba(148, 163, 184, 0.28);
+  background: rgba(2, 6, 23, 0.5);
 }
 
-.panel-loading,
-.panel-error,
-.panel-empty {
-  padding: 0.75rem;
-  font-size: 0.9rem;
+.pw-row.isSelected {
+  border-color: rgba(59, 130, 246, 0.55);
+  background: rgba(59, 130, 246, 0.12);
 }
 
-/* Sort controls */
-.sort-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.85rem;
+.pw-rowMain {
+  min-width: 0;
 }
 
-.sort-controls button {
-  border: 1px solid #ccc;
-  background: #f8f8f8;
+.pw-rowName {
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.pw-rowSub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.2;
+}
+
+/* Badges (risk tiers) */
+.pw-badge {
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  padding: 6px 10px;
   border-radius: 999px;
-  padding: 0.15rem 0.6rem;
-  cursor: pointer;
-  font-size: 0.8rem;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(2, 6, 23, 0.35);
+  white-space: nowrap;
 }
 
-.sort-controls button.active {
-  background: #007bff;
-  color: white;
-  border-color: #007bff;
+.pw-badge.green  { border-color: rgba(34, 197, 94, 0.55);  color: rgba(134, 239, 172, 0.95); }
+.pw-badge.yellow { border-color: rgba(234, 179, 8, 0.55);  color: rgba(253, 224, 71, 0.95); }
+.pw-badge.red    { border-color: rgba(239, 68, 68, 0.55);  color: rgba(252, 165, 165, 0.95); }
+
+/* Details panel */
+.pw-detailBody {
+  padding: 14px;
+  overflow: auto;
+  min-height: 0;
 }
 
-/* List panel scroll area */
-.park-list {
-  flex: 1;
-  overflow-y: auto;
-}
-
-.park-list-item {
-  padding: 0.4rem 0.75rem;
-  border-bottom: 1px solid #f0f0f0;
-  cursor: pointer;
+.pw-detailTitleRow {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
-.park-list-item:hover {
-  background: #f5f8ff;
+.pw-detailTitle {
+  font-size: 16px;
+  font-weight: 850;
+  line-height: 1.2;
 }
 
-.park-list-item.selected {
-  background: #e3f0ff;
+/* Key/value grid */
+.pw-kv {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 10px 12px;
+  align-items: start;
 }
 
-.park-list-name {
-  font-size: 0.9rem;
-  font-weight: 500;
+.pw-k {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
-.park-list-risk {
-  font-size: 0.75rem;
-  opacity: 0.8;
-}
-
-/* Detail panel scroll area */
-.park-details {
-  flex: 1;
-  padding: 0.75rem;
-  overflow-y: auto;
-}
-
-.park-detail-card h3 {
-  margin-top: 0;
-  margin-bottom: 0.5rem;
-}
-
-.park-detail-row {
-  margin-bottom: 0.25rem;
-  font-size: 0.9rem;
+.pw-v {
+  font-size: 13px;
+  color: var(--text);
 }

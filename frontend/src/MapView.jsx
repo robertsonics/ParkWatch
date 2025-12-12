@@ -1,192 +1,171 @@
 // src/MapView.jsx
-import { useEffect, useRef } from "react";
-import L from "leaflet";
+import { useEffect, useMemo, useRef } from "react";
+import {
+  MapContainer,
+  TileLayer,
+  LayersControl,
+  CircleMarker,
+  Tooltip,
+  useMap,
+} from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
-// Consistent ID for each park (same logic as in App)
-function getParkId(feature) {
-  const p = feature?.properties || {};
+/**
+ * React-Leaflet MapView
+ *
+ * Requirements covered here:
+ * - Start with entire Florida visible.
+ * - Do NOT zoom on load.
+ * - Zoom only after user selects a park (selectedId becomes non-null).
+ * - Markers color-coded by flood risk: green/yellow/red.
+ * - Satellite layer retained.
+ */
+
+// Stable ID must match App.jsx logic
+function getParkId(p) {
+  return p?.permit ?? `${p?.park_name ?? ""}|${p?.park_address ?? ""}`;
+}
+
+// Flood risk tiers: green/yellow/red
+function floodTier(flood_risk) {
+  const r = Number(flood_risk);
+  if (!Number.isFinite(r)) return "yellow";
+  if (r >= 7) return "red";
+  if (r >= 4) return "yellow";
+  return "green";
+}
+
+// Marker visual style by tier and selection
+function markerStyle(tier, isSelected) {
+  const colors = {
+    green: "#22c55e",
+    yellow: "#eab308",
+    red: "#ef4444",
+  };
+  const c = colors[tier] ?? colors.yellow;
+
+  return {
+    color: isSelected ? "#e5e7eb" : c, // stroke
+    weight: isSelected ? 2.5 : 1.5,
+    fillColor: c,
+    fillOpacity: isSelected ? 0.95 : 0.75,
+  };
+}
+
+// Leaflet expects [lat, lon]
+function parkLatLng(p) {
+  const lat = Number(p.latitude);
+  const lon = Number(p.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return [lat, lon];
+}
+
+// Approximate Florida bounds (tune if desired)
+const FL_BOUNDS = [
+  [24.35, -87.65], // SW
+  [31.1, -79.8],   // NE
+];
+
+export default function MapView({ parks, selectedId, onSelect }) {
+  // Precompute marker inputs for performance
+  const markerData = useMemo(() => {
+    return (parks ?? [])
+      .map((p) => ({ park: p, id: getParkId(p), latlng: parkLatLng(p) }))
+      .filter((x) => x.latlng);
+  }, [parks]);
+
   return (
-    p.permit ?? // preferred
-    `${p.park_name ?? ""}|${p.park_address ?? ""}` // last resort
+    <div className="pw-mapWrap">
+      <MapContainer className="pw-leaflet" center={[27.8, -81.7]} zoom={6} scrollWheelZoom>
+        <LayersControl position="topright">
+          {/* Dark basemap (default) */}
+          <LayersControl.BaseLayer checked name="Dark">
+            <TileLayer
+              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+              attribution="&copy; OpenStreetMap contributors &copy; CARTO"
+            />
+          </LayersControl.BaseLayer>
+
+          {/* Satellite imagery (retained as requested) */}
+          <LayersControl.BaseLayer name="Satellite">
+            <TileLayer
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+              attribution="Tiles &copy; Esri"
+            />
+          </LayersControl.BaseLayer>
+        </LayersControl>
+
+        {/* One-time: show Florida initially */}
+        <FitFloridaOnce />
+
+        {/* Critical: zoom only AFTER user selection (selectedId becomes non-null) */}
+        <ZoomToSelection parks={parks} selectedId={selectedId} />
+
+        {markerData.map(({ park, id, latlng }) => {
+          const tier = floodTier(park.flood_risk);
+          const isSelected = selectedId != null && id === selectedId;
+
+          return (
+            <CircleMarker
+              key={id}
+              center={latlng}
+              radius={isSelected ? 8 : 5}
+              pathOptions={markerStyle(tier, isSelected)}
+              eventHandlers={{
+                click: () => onSelect?.(park),
+              }}
+            >
+              <Tooltip direction="top" offset={[0, -6]} opacity={0.95}>
+                <div style={{ fontSize: 12 }}>
+                  <div style={{ fontWeight: 650 }}>{park.park_name ?? "Unnamed park"}</div>
+                  <div>
+                    {park.flood_zone ?? "—"} • risk {park.flood_risk ?? "—"}
+                  </div>
+                </div>
+              </Tooltip>
+            </CircleMarker>
+          );
+        })}
+      </MapContainer>
+    </div>
   );
 }
 
-export default function MapView({ parks, selectedPark, onSelectPark }) {
-  const mapRef = useRef(null); // DOM node for the map
-  const mapInstanceRef = useRef(null); // Leaflet map instance
-  const geoJsonLayerRef = useRef(null); // current GeoJSON layer
-  const markerRefs = useRef({}); // { [id]: markerInstance }
-  const initialFirstParkIdRef = useRef(null); // NEW: remember first park id
+/**
+ * Fits the map to Florida ONCE.
+ * We isolate this so it never re-fits on rerenders.
+ */
+function FitFloridaOnce() {
+  const map = useMap();
+  const didFit = useRef(false);
 
-  // One-time map initialization
   useEffect(() => {
-    if (mapInstanceRef.current || !mapRef.current) return;
+    if (didFit.current) return;
+    didFit.current = true;
+    map.fitBounds(FL_BOUNDS, { padding: [18, 18] });
+  }, [map]);
 
-    const map = L.map(mapRef.current).setView([27.5, -81.5], 6);
-    mapInstanceRef.current = map;
+  return null;
+}
 
-    // Base layers
-    const osm = L.tileLayer(
-      "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      {
-        maxZoom: 19,
-        attribution: "&copy; OpenStreetMap contributors",
-      }
-    ).addTo(map);
+/**
+ * Zoom behavior:
+ * - If selectedId is null (initial load), do nothing.
+ * - Once the user selects a park (from list or marker), selectedId becomes non-null and we zoom.
+ */
+function ZoomToSelection({ parks, selectedId }) {
+  const map = useMap();
 
-    const esriSat = L.tileLayer(
-      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-      {
-        attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics",
-      }
-    );
-
-    L.control
-      .layers(
-        { "Street Map": osm, Satellite: esriSat },
-        {}
-      )
-      .addTo(map);
-  }, []);
-
-  // Build/update GeoJSON layer whenever parks change
   useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
+    if (!selectedId) return;
 
-    // Remove previous layer if it exists
-    if (geoJsonLayerRef.current) {
-      map.removeLayer(geoJsonLayerRef.current);
-      geoJsonLayerRef.current = null;
-    }
+    const selected = (parks ?? []).find((p) => getParkId(p) === selectedId);
+    const latlng = selected ? parkLatLng(selected) : null;
+    if (!latlng) return;
 
-    // Clear marker ref map
-    markerRefs.current = {};
+    // Smooth zoom/pan. Keep current zoom if already close-in.
+    map.setView(latlng, Math.max(map.getZoom(), 11), { animate: true });
+  }, [parks, selectedId, map]);
 
-    if (!parks || parks.length === 0) return;
-
-    // NEW: remember the "first park" id for this dataset
-    if (!initialFirstParkIdRef.current && parks[0]) {
-      initialFirstParkIdRef.current = getParkId(parks[0]);
-    }
-
-    const featureCollection = {
-      type: "FeatureCollection",
-      features: parks,
-    };
-
-    const geoJsonLayer = L.geoJSON(featureCollection, {
-      pointToLayer: (feature, latlng) => {
-        const marker = L.circleMarker(latlng, {
-          radius: 5,
-          fillColor: "#4dd0e1", // default style
-          color: "#26c6da",
-          weight: 1,
-          fillOpacity: 1,
-        });
-
-        // Store reference for later highlighting
-        const id = getParkId(feature);
-        markerRefs.current[id] = marker;
-
-        return marker;
-      },
-      onEachFeature: (feature, layer) => {
-        const p = (feature && feature.properties) || {};
-
-        const mhSpacesRaw = p.mh_spaces ?? 0;
-        const rvSpacesRaw = p.rv_spaces ?? 0;
-
-        const mhSpaces =
-          typeof mhSpacesRaw === "number"
-            ? mhSpacesRaw
-            : Number(String(mhSpacesRaw).replace(/,/g, "")) || 0;
-
-        const rvSpaces =
-          typeof rvSpacesRaw === "number"
-            ? rvSpacesRaw
-            : Number(String(rvSpacesRaw).replace(/,/g, "")) || 0;
-
-        const totalSpaces = mhSpaces + rvSpaces;
-
-        const popupContent = `
-          <b>${p.park_name ?? ""}</b><br>
-          ${p.park_address ?? ""}<br>
-          ${p.park_city ?? ""}, ${p.park_state ?? "FL"} ${
-          p.park_zip ?? ""
-        }<br>
-          <br>
-          <b>County:</b> ${p.county ?? ""}<br>
-          <b>MH Spaces:</b> ${p.mh_spaces ?? "N/A"}<br>
-          <b>RV Spaces:</b> ${p.rv_spaces ?? "N/A"}<br>
-          <b>Billing Spaces:</b> ${p.billing_spaces ?? "N/A"}<br>
-          <b>Total Spaces:</b> ${totalSpaces}<br>
-          <b>Latitude:</b> ${p.latitude ?? ""}<br>
-          <b>Longitude:</b> ${p.longitude ?? ""}<br>
-          <b>Geocode Status:</b> ${p.geocode_status ?? ""}<br>
-        `;
-        layer.bindPopup(popupContent);
-
-        // When marker is clicked, notify parent so it can update list + details
-        layer.on("click", () => {
-          if (onSelectPark) onSelectPark(feature);
-        });
-      },
-    });
-
-    geoJsonLayerRef.current = geoJsonLayer;
-    geoJsonLayer.addTo(map);
-  }, [parks, onSelectPark]);
-
-  // When selectedPark changes: zoom/fly and highlight marker
-  useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map || !selectedPark) return;
-
-    const selectedId = getParkId(selectedPark);
-    const coords = selectedPark.geometry?.coordinates;
-
-    // ONLY flyTo if this is NOT the initially selected first park
-    if (
-      coords &&
-      coords.length >= 2 &&
-      selectedId !== initialFirstParkIdRef.current
-    ) {
-      const [lon, lat] = coords; // GeoJSON: [lon, lat]
-      map.flyTo([lat, lon], 12);
-    }
-
-    // Reset all markers to default style
-    Object.values(markerRefs.current).forEach((marker) => {
-      marker.setStyle({
-        radius: 5,
-        fillColor: "#4dd0e1",
-        color: "#26c6da",
-        weight: 1,
-        fillOpacity: 1,
-      });
-    });
-
-    // Highlight selected marker
-    const selectedMarker = markerRefs.current[selectedId];
-    if (selectedMarker) {
-      selectedMarker.setStyle({
-        radius: 8,
-        fillColor: "#ffeb3b", // bright yellow
-        color: "#fdd835",
-        weight: 2,
-        fillOpacity: 1,
-      });
-      selectedMarker.bringToFront();
-    }
-  }, [selectedPark]);
-
-  return (
-    <div
-      ref={mapRef}
-      className="map-container"
-      style={{ width: "100%", height: "100%" }}
-    />
-  );
+  return null;
 }

@@ -2,314 +2,240 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import MapView from "./MapView";
 import "./App.css";
-import { sql } from "./neonClient"; // NEW: Neon client
+import { sql } from "./neonClient";
 
-// Helper: consistent ID for each park
-function getParkId(feature) {
-  const p = feature?.properties || {};
-  return (
-    p.permit ?? // primary
-    `${p.park_name ?? ""}|${p.park_address ?? ""}` // fallback
-  );
+/**
+ * ParkWatch – Clean UI Restart
+ *
+ * Design principles:
+ * - App owns data + selection state (single source of truth).
+ * - MapView is a visual component: render markers + handle map interactions.
+ * - NO default selection on load.
+ * - Map only zooms after the user selects a park (from map or list).
+ */
+
+// Stable ID for each park row
+function getParkId(p) {
+  return p?.permit ?? `${p?.park_name ?? ""}|${p?.park_address ?? ""}`;
 }
 
-function App() {
-  const [parks, setParks] = useState([]);
-  const [selectedPark, setSelectedPark] = useState(null);
-  const [sortMode, setSortMode] = useState("alpha");
+/**
+ * Flood risk → 3-tier mapping (green/yellow/red).
+ * Adjust thresholds if your flood_risk scale differs.
+ */
+function floodTier(flood_risk) {
+  const r = Number(flood_risk);
+  if (!Number.isFinite(r)) return "yellow"; // unknown -> caution
+  if (r >= 7) return "red";
+  if (r >= 4) return "yellow";
+  return "green";
+}
+
+export default function App() {
+  const [parks, setParks] = useState([]); // array of rows from Neon
+  const [selectedId, setSelectedId] = useState(null); // null until user selects
+  const [selectionSource, setSelectionSource] = useState(null); // "map" | "list" | null
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [selectionSource, setSelectionSource] = useState(null); // "map" | "list" | null
 
-  // refs to each list item: { [id]: HTMLElement }
-  const itemRefs = useRef({});
+  // Refs so we can scroll the list to the selected park when user clicks a marker
+  const itemRefs = useRef({}); // { [id]: HTMLElement }
 
-  // Fetch parks from Neon once
+  // Load parks from Neon (serving DB)
   useEffect(() => {
+    let cancelled = false;
+
     async function fetchParks() {
       try {
         setLoading(true);
         setError(null);
 
-        // Neon query: select the same columns from fl_parks
+        // Keep query minimal: only what the UI needs now
         const rows = await sql`
           SELECT
             permit,
-            county,
             park_name,
             park_address,
             park_city,
-            park_state,
-            park_zip,
-            phone,
-            owner_co,
-            owner_first,
-            owner_last,
-            owner_address,
-            owner_city,
-            owner_state,
-            owner_zip,
-            mail_address,
-            mail_city,
-            mail_state,
-            mail_zip,
-            park_type,
-            mh_spaces,
-            rv_spaces,
             billing_spaces,
             latitude,
             longitude,
-            geocode_status
+            flood_zone,
+            flood_risk
           FROM fl_parks
           WHERE latitude IS NOT NULL
             AND longitude IS NOT NULL;
         `;
 
-        console.log("Neon fl_parks rows:", rows);
+        if (cancelled) return;
 
-        const features =
-          (rows || []).map((row) => ({
-            type: "Feature",
-            geometry: {
-              type: "Point",
-              // GeoJSON uses [lon, lat]
-              coordinates: [
-                row.longitude != null ? Number(row.longitude) : null,
-                row.latitude != null ? Number(row.latitude) : null,
-              ],
-            },
-            properties: row,
-          })) ?? [];
+        setParks(rows ?? []);
 
-        setParks(features);
-
-        if (features.length > 0) {
-          setSelectedPark(features[0]);
-        }
-      } catch (err) {
-        console.error("Error loading parks from Neon:", err);
-        setError("Failed to load parks from database.");
+        // CRITICAL: start with NO selection to avoid zooming on refresh
+        setSelectedId(null);
+        setSelectionSource(null);
+      } catch (e) {
+        console.error("Neon load error:", e);
+        if (!cancelled) setError("Failed to load parks from Neon.");
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
     fetchParks();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  // Sort parks for list
+  // Selected park object (derived)
+  const selectedPark = useMemo(() => {
+    if (!selectedId) return null;
+    return parks.find((p) => getParkId(p) === selectedId) ?? null;
+  }, [parks, selectedId]);
+
+  // Sort parks A–Z for a clean, predictable list (add sort controls later if desired)
   const sortedParks = useMemo(() => {
     const copy = [...parks];
-
-    if (sortMode === "risk") {
-      copy.sort((a, b) => {
-        const ra = a.properties?.risk_score ?? a.properties?.overall_risk ?? 0;
-        const rb = b.properties?.risk_score ?? b.properties?.overall_risk ?? 0;
-        return rb - ra;
-      });
-    } else {
-      copy.sort((a, b) => {
-        const nameA = (a.properties?.park_name ?? "").toLowerCase();
-        const nameB = (b.properties?.park_name ?? "").toLowerCase();
-        return nameA.localeCompare(nameB);
-      });
-    }
-
+    copy.sort((a, b) =>
+      String(a.park_name ?? "").localeCompare(String(b.park_name ?? ""), undefined, {
+        sensitivity: "base",
+      })
+    );
     return copy;
-  }, [parks, sortMode]);
+  }, [parks]);
 
-  // Unified selection handler; source = "map" or "list"
-  function handleSelectPark(feature, source) {
-    setSelectedPark(feature);
+  // Unified selection handler
+  function selectPark(park, source) {
+    const id = getParkId(park);
+    setSelectedId(id);
     setSelectionSource(source);
   }
 
-  // When a marker selects a park, scroll list to that park
+  // If selection originated from the map, scroll list to the selected park
   useEffect(() => {
-    if (!selectedPark || selectionSource !== "map") return;
+    if (!selectedId || selectionSource !== "map") return;
 
-    const id = getParkId(selectedPark);
-    const el = itemRefs.current[id];
-    if (el && el.scrollIntoView) {
-      el.scrollIntoView({ block: "start", behavior: "smooth" });
+    const el = itemRefs.current[selectedId];
+    if (el?.scrollIntoView) {
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
     }
 
-    // reset to avoid re-triggering on rerenders
+    // Reset source so we don’t keep triggering scroll on incidental rerenders
     setSelectionSource(null);
-  }, [selectedPark, selectionSource]);
+  }, [selectedId, selectionSource]);
 
   return (
-    <div className="app-layout">
-      {/* LEFT: map panel */}
-      <div className="panel map-panel">
-        {loading && <div className="panel-loading">Loading parks…</div>}
-        {error && <div className="panel-error">{error}</div>}
-
-        {!loading && !error && (
-          <MapView
-            parks={parks}
-            selectedPark={selectedPark}
-            onSelectPark={(feature) => handleSelectPark(feature, "map")}
-          />
-        )}
-      </div>
-
-      {/* RIGHT-TOP: park list */}
-      <div className="panel list-panel">
-        <div className="panel-header">
-          <h2>Parks</h2>
-          <div className="sort-controls">
-            <span>Sort by:</span>
-            <button
-              className={sortMode === "alpha" ? "active" : ""}
-              onClick={() => setSortMode("alpha")}
-            >
-              A–Z
-            </button>
-            <button
-              className={sortMode === "risk" ? "active" : ""}
-              onClick={() => setSortMode("risk")}
-            >
-              Risk
-            </button>
-          </div>
+    <div className="pw-root">
+      <header className="pw-topbar">
+        <div className="pw-brand">
+          <div className="pw-title">ParkWatch</div>
+          <div className="pw-subtitle">Florida • Flood risk visualization</div>
         </div>
+      </header>
 
-        <div className="park-list">
-          {sortedParks.map((feature) => {
-            const p = feature.properties ?? {};
-            const name = p.park_name ?? "Unnamed park";
-            const id = getParkId(feature);
-            const isSelected =
-              selectedPark && getParkId(selectedPark) === id;
+      <main className="pw-grid">
+        {/* MAP */}
+        <section className="pw-panel pw-map">
+          <div className="pw-panelHeader">Map</div>
 
-            const risk = p.risk_score ?? p.overall_risk ?? null;
+          {loading && <div className="pw-status">Loading parks…</div>}
+          {error && <div className="pw-status pw-error">{error}</div>}
 
-            return (
-              <div
-                key={id}
-                ref={(el) => {
-                  if (el) itemRefs.current[id] = el;
-                  else delete itemRefs.current[id];
-                }}
-                className={`park-list-item ${isSelected ? "selected" : ""}`}
-                onClick={() => handleSelectPark(feature, "list")}
-              >
-                <div className="park-list-name">{name}</div>
-                {risk != null && (
-                  <div className="park-list-risk">
-                    Risk: {Number(risk).toFixed(1)}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {!loading && !error && sortedParks.length === 0 && (
-            <div className="panel-empty">No parks found.</div>
+          {!loading && !error && (
+            <MapView
+              parks={parks}
+              selectedId={selectedId}
+              // MapView should only zoom when selection was user-driven:
+              // Because we never set selectedId on load, the first selection is always user action.
+              onSelect={(park) => selectPark(park, "map")}
+            />
           )}
-        </div>
-      </div>
+        </section>
 
-      {/* RIGHT-BOTTOM: details */}
-      <div className="panel detail-panel">
-        <div className="panel-header">
-          <h2>Park Details</h2>
-        </div>
+        {/* LIST */}
+        <section className="pw-panel pw-list">
+          <div className="pw-panelHeader">Parks</div>
 
-        <div className="park-details">
-          {!selectedPark && <div>Select a park from the map or list.</div>}
-          {selectedPark && <ParkDetailCard feature={selectedPark} />}
-        </div>
-      </div>
+          <div className="pw-listBody">
+            {sortedParks.map((p) => {
+              const id = getParkId(p);
+              const isSelected = selectedId === id;
+              const tier = floodTier(p.flood_risk);
+
+              return (
+                <button
+                  key={id}
+                  ref={(el) => {
+                    if (el) itemRefs.current[id] = el;
+                    else delete itemRefs.current[id];
+                  }}
+                  className={`pw-row ${isSelected ? "isSelected" : ""}`}
+                  onClick={() => selectPark(p, "list")}
+                >
+                  <div className="pw-rowMain">
+                    <div className="pw-rowName">{p.park_name ?? "Unnamed park"}</div>
+                    <div className="pw-rowSub">
+                      {p.park_city ?? ""}
+                      {p.park_city && (p.park_address ? " • " : "")}
+                      {p.park_address ?? ""}
+                    </div>
+                  </div>
+
+                  <div className={`pw-badge ${tier}`}>{tier.toUpperCase()}</div>
+                </button>
+              );
+            })}
+
+            {!loading && !error && sortedParks.length === 0 && (
+              <div className="pw-status">No parks found.</div>
+            )}
+          </div>
+        </section>
+
+        {/* DETAILS */}
+        <section className="pw-panel pw-detail">
+          <div className="pw-panelHeader">Park Details</div>
+
+          {!selectedPark ? (
+            <div className="pw-empty">
+              Select a park from the map or list. The map will only zoom after you select.
+            </div>
+          ) : (
+            <ParkDetails park={selectedPark} />
+          )}
+        </section>
+      </main>
     </div>
   );
 }
 
-function ParkDetailCard({ feature }) {
-  const p = feature.properties ?? {};
-
-  const mhSpacesRaw = p.mh_spaces ?? 0;
-  const rvSpacesRaw = p.rv_spaces ?? 0;
-
-  const mhSpaces =
-    typeof mhSpacesRaw === "number"
-      ? mhSpacesRaw
-      : Number(String(mhSpacesRaw).replace(/,/g, "")) || 0;
-
-  const rvSpaces =
-    typeof rvSpacesRaw === "number"
-      ? rvSpacesRaw
-      : Number(String(rvSpacesRaw).replace(/,/g, "")) || 0;
-
-  const totalSpaces = mhSpaces + rvSpaces;
-
-  const name = p.park_name ?? "Unnamed park";
-  const address = p.park_address ?? "";
-  const city = p.park_city ?? "";
-  const state = p.park_state ?? "FL";
-  const zip = p.park_zip ?? "";
-
-  const county = p.county ?? "";
-  const billingSpaces = p.billing_spaces ?? "N/A";
-  const geocodeStatus = p.geocode_status ?? "";
-  const lat = p.latitude ?? "";
-  const lon = p.longitude ?? "";
-
-  const risk = p.risk_score ?? p.overall_risk;
+function ParkDetails({ park }) {
+  const tier = floodTier(park.flood_risk);
 
   return (
-    <div className="park-detail-card">
-      <h3>{name}</h3>
-
-      {risk != null && (
-        <div className="park-detail-row">
-          <strong>Risk score:</strong> {Number(risk).toFixed(1)}
-        </div>
-      )}
-
-      {(address || city || zip) && (
-        <div className="park-detail-row">
-          <strong>Address:</strong>{" "}
-          {address && <span>{address}, </span>}
-          {city && <span>{city}, </span>}
-          <span>{state}</span>
-          {zip && <span> {zip}</span>}
-        </div>
-      )}
-
-      {county && (
-        <div className="park-detail-row">
-          <strong>County:</strong> {county}
-        </div>
-      )}
-
-      <div className="park-detail-row">
-        <strong>MH Spaces:</strong> {p.mh_spaces ?? "N/A"}
-      </div>
-      <div className="park-detail-row">
-        <strong>RV Spaces:</strong> {p.rv_spaces ?? "N/A"}
-      </div>
-      <div className="park-detail-row">
-        <strong>Billing Spaces:</strong> {billingSpaces}
-      </div>
-      <div className="park-detail-row">
-        <strong>Total Spaces:</strong> {totalSpaces}
+    <div className="pw-detailBody">
+      <div className="pw-detailTitleRow">
+        <div className="pw-detailTitle">{park.park_name ?? "Unnamed park"}</div>
+        <div className={`pw-badge ${tier}`}>{tier.toUpperCase()}</div>
       </div>
 
-      {(lat || lon) && (
-        <div className="park-detail-row">
-          <strong>Lat/Lon:</strong> {lat}, {lon}
-        </div>
-      )}
+      <div className="pw-kv">
+        <div className="pw-k">Park address</div>
+        <div className="pw-v">{park.park_address ?? "—"}</div>
 
-      {geocodeStatus && (
-        <div className="park-detail-row">
-          <strong>Geocode Status:</strong> {geocodeStatus}
-        </div>
-      )}
+        <div className="pw-k">Park city</div>
+        <div className="pw-v">{park.park_city ?? "—"}</div>
+
+        <div className="pw-k">Billing spaces</div>
+        <div className="pw-v">{park.billing_spaces ?? "—"}</div>
+
+        <div className="pw-k">Flood zone</div>
+        <div className="pw-v">{park.flood_zone ?? "—"}</div>
+
+        <div className="pw-k">Flood risk</div>
+        <div className="pw-v">{park.flood_risk ?? "—"}</div>
+      </div>
     </div>
   );
 }
-
-export default App;
