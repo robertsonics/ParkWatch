@@ -1,55 +1,30 @@
 // src/MapView.jsx
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   MapContainer,
   TileLayer,
   LayersControl,
   CircleMarker,
   Tooltip,
+  GeoJSON,
   useMap,
 } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
+import { floodTier, tierColor } from "./risk";
+
 /**
  * React-Leaflet MapView
  *
- * Requirements covered here:
- * - Start with entire Florida visible.
- * - Do NOT zoom on load.
- * - Zoom only after user selects a park (selectedId becomes non-null).
- * - Markers color-coded by flood risk: green/yellow/red.
- * - Satellite layer retained.
+ * Adds a FEMA Flood Hazard Zones overlay for the selected park:
+ * - No selection → no overlay
+ * - Selection → fetch /api/fema-floodzone?lat=...&lon=...
+ * - Overlay is rendered as a GeoJSON polygon with muted fill + outlined edge
  */
 
 // Stable ID must match App.jsx logic
 function getParkId(p) {
   return p?.permit ?? `${p?.park_name ?? ""}|${p?.park_address ?? ""}`;
-}
-
-// Flood risk tiers: green/yellow/red
-function floodTier(flood_risk) {
-  const r = Number(flood_risk);
-  if (!Number.isFinite(r)) return "yellow";
-  if (r >= 3) return "red";
-  if (r >= 2) return "yellow";
-  return "green";
-}
-
-// Marker visual style by tier and selection
-function markerStyle(tier, isSelected) {
-  const colors = {
-    green: "#22c55e",
-    yellow: "#eab308",
-    red: "#ef4444",
-  };
-  const c = colors[tier] ?? colors.yellow;
-
-  return {
-    color: isSelected ? "#e5e7eb" : c, // stroke
-    weight: isSelected ? 2.5 : 1.5,
-    fillColor: c,
-    fillOpacity: isSelected ? 0.95 : 0.75,
-  };
 }
 
 // Leaflet expects [lat, lon]
@@ -60,11 +35,22 @@ function parkLatLng(p) {
   return [lat, lon];
 }
 
-// Approximate Florida bounds (tune if desired)
+// Approx Florida bounds
 const FL_BOUNDS = [
-  [24.35, -87.65], // SW
-  [31.1, -79.8],   // NE
+  [24.35, -87.65],
+  [31.1, -79.8],
 ];
+
+// Marker style by tier and selection
+function markerStyle(tier, isSelected) {
+  const c = tierColor(tier);
+  return {
+    color: isSelected ? "#e5e7eb" : c,
+    weight: isSelected ? 2.5 : 1.5,
+    fillColor: c,
+    fillOpacity: isSelected ? 0.95 : 0.75,
+  };
+}
 
 export default function MapView({ parks, selectedId, onSelect }) {
   // Precompute marker inputs for performance
@@ -74,11 +60,76 @@ export default function MapView({ parks, selectedId, onSelect }) {
       .filter((x) => x.latlng);
   }, [parks]);
 
+  // Selected park object (for overlay + zoom)
+  const selectedPark = useMemo(() => {
+    if (!selectedId) return null;
+    return (parks ?? []).find((p) => getParkId(p) === selectedId) ?? null;
+  }, [parks, selectedId]);
+
+  // FEMA overlay GeoJSON for the selected park
+  const [femaGeoJson, setFemaGeoJson] = useState(null);
+
+  // Fetch the FEMA polygon whenever selection changes
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchOverlay() {
+      if (!selectedPark) {
+        setFemaGeoJson(null);
+        return;
+      }
+
+      const lat = Number(selectedPark.latitude);
+      const lon = Number(selectedPark.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        setFemaGeoJson(null);
+        return;
+      }
+
+      try {
+        // IMPORTANT: This hits your local/prod Vercel Function, not FEMA directly from the browser.
+        const r = await fetch(`/api/fema-floodzone?lat=${lat}&lon=${lon}`);
+        if (!r.ok) {
+          setFemaGeoJson(null);
+          return;
+        }
+
+        const gj = await r.json();
+
+        // Some responses may be empty FeatureCollections. Handle gracefully.
+        if (!cancelled) {
+          const hasFeatures = Array.isArray(gj?.features) && gj.features.length > 0;
+          setFemaGeoJson(hasFeatures ? gj : null);
+        }
+      } catch (e) {
+        if (!cancelled) setFemaGeoJson(null);
+      }
+    }
+
+    fetchOverlay();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPark]);
+
+  // Determine overlay style based on the selected park's flood risk tier
+  const overlayStyle = useMemo(() => {
+    if (!selectedPark) return null;
+    const tier = floodTier(selectedPark.flood_risk);
+    const c = tierColor(tier);
+    return {
+      color: c,
+      weight: 3,
+      opacity: 0.9,
+      fillColor: c,
+      fillOpacity: 0.12,
+    };
+  }, [selectedPark]);
+
   return (
     <div className="pw-mapWrap">
       <MapContainer className="pw-leaflet" center={[27.8, -81.7]} zoom={6} scrollWheelZoom>
         <LayersControl position="topright">
-          {/* Dark basemap (default) */}
           <LayersControl.BaseLayer checked name="Dark">
             <TileLayer
               url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
@@ -86,7 +137,6 @@ export default function MapView({ parks, selectedId, onSelect }) {
             />
           </LayersControl.BaseLayer>
 
-          {/* Satellite imagery (retained as requested) */}
           <LayersControl.BaseLayer name="Satellite">
             <TileLayer
               url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
@@ -95,12 +145,22 @@ export default function MapView({ parks, selectedId, onSelect }) {
           </LayersControl.BaseLayer>
         </LayersControl>
 
-        {/* One-time: show Florida initially */}
+        {/* Initial view: Florida */}
         <FitFloridaOnce />
 
-        {/* Critical: zoom only AFTER user selection (selectedId becomes non-null) */}
-        <ZoomToSelection parks={parks} selectedId={selectedId} />
+        {/* Zoom only after user selection (selectedId is null on load in App.jsx) */}
+        <ZoomToSelection selectedPark={selectedPark} />
 
+        {/* FEMA flood hazard zone overlay for the selected park */}
+        {femaGeoJson && overlayStyle ? (
+          <GeoJSON
+            key={selectedId} // force clean replace when selection changes
+            data={femaGeoJson}
+            style={() => overlayStyle}
+          />
+        ) : null}
+
+        {/* Park markers */}
         {markerData.map(({ park, id, latlng }) => {
           const tier = floodTier(park.flood_risk);
           const isSelected = selectedId != null && id === selectedId;
@@ -111,9 +171,7 @@ export default function MapView({ parks, selectedId, onSelect }) {
               center={latlng}
               radius={isSelected ? 8 : 5}
               pathOptions={markerStyle(tier, isSelected)}
-              eventHandlers={{
-                click: () => onSelect?.(park),
-              }}
+              eventHandlers={{ click: () => onSelect?.(park) }}
             >
               <Tooltip direction="top" offset={[0, -6]} opacity={0.95}>
                 <div style={{ fontSize: 12 }}>
@@ -131,10 +189,6 @@ export default function MapView({ parks, selectedId, onSelect }) {
   );
 }
 
-/**
- * Fits the map to Florida ONCE.
- * We isolate this so it never re-fits on rerenders.
- */
 function FitFloridaOnce() {
   const map = useMap();
   const didFit = useRef(false);
@@ -148,24 +202,17 @@ function FitFloridaOnce() {
   return null;
 }
 
-/**
- * Zoom behavior:
- * - If selectedId is null (initial load), do nothing.
- * - Once the user selects a park (from list or marker), selectedId becomes non-null and we zoom.
- */
-function ZoomToSelection({ parks, selectedId }) {
+function ZoomToSelection({ selectedPark }) {
   const map = useMap();
 
   useEffect(() => {
-    if (!selectedId) return;
+    if (!selectedPark) return;
 
-    const selected = (parks ?? []).find((p) => getParkId(p) === selectedId);
-    const latlng = selected ? parkLatLng(selected) : null;
+    const latlng = parkLatLng(selectedPark);
     if (!latlng) return;
 
-    // Smooth zoom/pan. Keep current zoom if already close-in.
     map.setView(latlng, Math.max(map.getZoom(), 11), { animate: true });
-  }, [parks, selectedId, map]);
+  }, [selectedPark, map]);
 
   return null;
 }
