@@ -7,27 +7,29 @@ import {
   CircleMarker,
   Tooltip,
   GeoJSON,
+  Pane,
   useMap,
 } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
-import { floodTier, tierColor } from "./risk";
-
 /**
- * React-Leaflet MapView
+ * FIXES INCLUDED:
+ * 1) Overlay fetch happens ONLY on selection.
+ * 2) Overlay is cleared immediately on selection change (no stale outlines).
+ * 3) Overlay does NOT block marker clicks:
+ *    - Render polygon in a lower pane
+ *    - Set interactive={false} so it doesn't capture pointer events
+ * 4) Overlay styling matches the selected park's flood-risk tier.
  *
- * Adds a FEMA Flood Hazard Zones overlay for the selected park:
- * - No selection → no overlay
- * - Selection → fetch /api/fema-floodzone?lat=...&lon=...
- * - Overlay is rendered as a GeoJSON polygon with muted fill + outlined edge
+ * IMPORTANT:
+ * For "wrong polygon" or "missing polygon" issues, you must also improve the API
+ * selection logic (see recommended /api changes below).
  */
 
-// Stable ID must match App.jsx logic
 function getParkId(p) {
   return p?.permit ?? `${p?.park_name ?? ""}|${p?.park_address ?? ""}`;
 }
 
-// Leaflet expects [lat, lon]
 function parkLatLng(p) {
   const lat = Number(p.latitude);
   const lon = Number(p.longitude);
@@ -35,94 +37,92 @@ function parkLatLng(p) {
   return [lat, lon];
 }
 
-// Approx Florida bounds
+// Adjust these thresholds to your real scale
+function floodTier(flood_risk) {
+  const r = Number(flood_risk);
+  if (!Number.isFinite(r)) return "yellow";
+  if (r >= 7) return "red";
+  if (r >= 4) return "yellow";
+  return "green";
+}
+
+function tierColor(tier) {
+  if (tier === "green") return "#22c55e";
+  if (tier === "red") return "#ef4444";
+  return "#eab308";
+}
+
 const FL_BOUNDS = [
   [24.35, -87.65],
   [31.1, -79.8],
 ];
 
-// Marker style by tier and selection
-function markerStyle(tier, isSelected) {
-  const c = tierColor(tier);
-  return {
-    color: isSelected ? "#e5e7eb" : c,
-    weight: isSelected ? 2.5 : 1.5,
-    fillColor: c,
-    fillOpacity: isSelected ? 0.95 : 0.75,
-  };
-}
-
 export default function MapView({ parks, selectedId, onSelect }) {
-  // Precompute marker inputs for performance
   const markerData = useMemo(() => {
     return (parks ?? [])
       .map((p) => ({ park: p, id: getParkId(p), latlng: parkLatLng(p) }))
       .filter((x) => x.latlng);
   }, [parks]);
 
-  // Selected park object (for overlay + zoom)
   const selectedPark = useMemo(() => {
     if (!selectedId) return null;
     return (parks ?? []).find((p) => getParkId(p) === selectedId) ?? null;
   }, [parks, selectedId]);
 
-  // FEMA overlay GeoJSON for the selected park
-  const [femaGeoJson, setFemaGeoJson] = useState(null);
+  const selectedTier = useMemo(() => {
+    if (!selectedPark) return null;
+    return floodTier(selectedPark.flood_risk);
+  }, [selectedPark]);
 
-  // Fetch the FEMA polygon whenever selection changes
+  // Exactly one overlay at a time
+  const [overlayGeoJson, setOverlayGeoJson] = useState(null);
+  const activeRequestIdRef = useRef(0);
+
+  // Fetch overlay ONLY on selection
   useEffect(() => {
     let cancelled = false;
 
     async function fetchOverlay() {
-      if (!selectedPark) {
-        setFemaGeoJson(null);
-        return;
-      }
+      // Always clear overlay immediately when selection changes
+      setOverlayGeoJson(null);
+
+      if (!selectedPark) return;
 
       const lat = Number(selectedPark.latitude);
       const lon = Number(selectedPark.longitude);
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-        setFemaGeoJson(null);
-        return;
-      }
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+      const requestId = ++activeRequestIdRef.current;
 
       try {
-        // IMPORTANT: This hits your local/prod Vercel Function, not FEMA directly from the browser.
-        const r = await fetch(`/api/fema-floodzone?lat=${lat}&lon=${lon}`);
+        const r = await fetch(`/api/fema-floodzone?lat=${lat}&lon=${lon}`, {
+          headers: { Accept: "application/json" },
+        });
+
+        if (cancelled) return;
+        // Ignore stale responses
+        if (requestId !== activeRequestIdRef.current) return;
+
         if (!r.ok) {
-          setFemaGeoJson(null);
+          setOverlayGeoJson(null);
           return;
         }
 
         const gj = await r.json();
+        const hasFeatures = Array.isArray(gj?.features) && gj.features.length > 0;
 
-        // Some responses may be empty FeatureCollections. Handle gracefully.
-        if (!cancelled) {
-          const hasFeatures = Array.isArray(gj?.features) && gj.features.length > 0;
-          setFemaGeoJson(hasFeatures ? gj : null);
+        setOverlayGeoJson(hasFeatures ? gj : null);
+      } catch {
+        if (!cancelled && requestId === activeRequestIdRef.current) {
+          setOverlayGeoJson(null);
         }
-      } catch (e) {
-        if (!cancelled) setFemaGeoJson(null);
       }
     }
 
     fetchOverlay();
+
     return () => {
       cancelled = true;
-    };
-  }, [selectedPark]);
-
-  // Determine overlay style based on the selected park's flood risk tier
-  const overlayStyle = useMemo(() => {
-    if (!selectedPark) return null;
-    const tier = floodTier(selectedPark.flood_risk);
-    const c = tierColor(tier);
-    return {
-      color: c,
-      weight: 3,
-      opacity: 0.9,
-      fillColor: c,
-      fillOpacity: 0.12,
     };
   }, [selectedPark]);
 
@@ -145,33 +145,54 @@ export default function MapView({ parks, selectedId, onSelect }) {
           </LayersControl.BaseLayer>
         </LayersControl>
 
-        {/* Initial view: Florida */}
         <FitFloridaOnce />
+        <ZoomToSelection parks={parks} selectedId={selectedId} />
 
-        {/* Zoom only after user selection (selectedId is null on load in App.jsx) */}
-        <ZoomToSelection selectedPark={selectedPark} />
+        {/* Pane order: polygon BELOW markers so it cannot block clicks */}
+        <Pane name="floodPolygon" style={{ zIndex: 300 }} />
+        <Pane name="parkMarkers" style={{ zIndex: 500 }} />
 
-        {/* FEMA flood hazard zone overlay for the selected park */}
-        {femaGeoJson && overlayStyle ? (
+        {/* Single selected flood zone overlay */}
+        {overlayGeoJson && selectedTier ? (
           <GeoJSON
-            key={selectedId} // force clean replace when selection changes
-            data={femaGeoJson}
-            style={() => overlayStyle}
+            key={selectedId}                 // ensures only one layer exists
+            data={overlayGeoJson}
+            pane="floodPolygon"
+            interactive={false}              // CRITICAL: don't capture clicks
+            style={() => {
+              const c = tierColor(selectedTier);
+              return {
+                color: c,
+                weight: 3,
+                opacity: 0.95,
+                fillColor: c,
+                fillOpacity: 0.12,
+              };
+            }}
           />
         ) : null}
 
-        {/* Park markers */}
+        {/* Markers always above polygon */}
         {markerData.map(({ park, id, latlng }) => {
           const tier = floodTier(park.flood_risk);
+          const c = tierColor(tier);
           const isSelected = selectedId != null && id === selectedId;
 
           return (
             <CircleMarker
               key={id}
               center={latlng}
+              pane="parkMarkers"
               radius={isSelected ? 8 : 5}
-              pathOptions={markerStyle(tier, isSelected)}
-              eventHandlers={{ click: () => onSelect?.(park) }}
+              pathOptions={{
+                color: isSelected ? "#e5e7eb" : c,
+                weight: isSelected ? 2.5 : 1.5,
+                fillColor: c,
+                fillOpacity: isSelected ? 0.95 : 0.75,
+              }}
+              eventHandlers={{
+                click: () => onSelect?.(park),
+              }}
             >
               <Tooltip direction="top" offset={[0, -6]} opacity={0.95}>
                 <div style={{ fontSize: 12 }}>
@@ -202,17 +223,18 @@ function FitFloridaOnce() {
   return null;
 }
 
-function ZoomToSelection({ selectedPark }) {
+function ZoomToSelection({ parks, selectedId }) {
   const map = useMap();
 
   useEffect(() => {
-    if (!selectedPark) return;
+    if (!selectedId) return;
 
-    const latlng = parkLatLng(selectedPark);
+    const selected = (parks ?? []).find((p) => getParkId(p) === selectedId);
+    const latlng = selected ? parkLatLng(selected) : null;
     if (!latlng) return;
 
     map.setView(latlng, Math.max(map.getZoom(), 11), { animate: true });
-  }, [selectedPark, map]);
+  }, [parks, selectedId, map]);
 
   return null;
 }
