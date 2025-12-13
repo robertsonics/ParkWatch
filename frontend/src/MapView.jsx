@@ -196,7 +196,7 @@ export default function MapView({ parks, selectedId, onSelect }) {
             >
               <Tooltip direction="top" offset={[0, -6]} opacity={0.95}>
                 <div style={{ fontSize: 12 }}>
-                  <div style={{ fontWeight: 650 }}>{park.park_name ?? "Unnamed park"}</div>
+                  <div style={{ fontWeight: 650 }}>{park.park_name ?? "Unnamed community"}</div>
                   <div>
                     {park.flood_zone ?? "—"} • risk {park.flood_risk ?? "—"}
                   </div>

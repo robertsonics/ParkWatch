@@ -139,7 +139,7 @@ export default function App() {
         <section className="pw-panel pw-map">
           <div className="pw-panelHeader">Map</div>
 
-          {loading && <div className="pw-status">Loading parks…</div>}
+          {loading && <div className="pw-status">Loading communities…</div>}
           {error && <div className="pw-status pw-error">{error}</div>}
 
           {!loading && !error && (
@@ -155,7 +155,7 @@ export default function App() {
 
         {/* LIST */}
         <section className="pw-panel pw-list">
-          <div className="pw-panelHeader">Parks</div>
+          <div className="pw-panelHeader">Communities</div>
 
           <div className="pw-listBody">
             {sortedParks.map((p) => {
@@ -195,7 +195,7 @@ export default function App() {
 
         {/* DETAILS */}
         <section className="pw-panel pw-detail">
-          <div className="pw-panelHeader">Park Details</div>
+          <div className="pw-panelHeader">Community Details</div>
 
           {!selectedPark ? (
             <div className="pw-empty">
