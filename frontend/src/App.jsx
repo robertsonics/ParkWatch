@@ -214,7 +214,7 @@ export default function App() {
 
           {!selectedPark ? (
             <div className="pw-empty">
-              Select a park from the map or list.
+              Select a community from the map or list.
             </div>
           ) : (
             <ParkDetails park={selectedPark} />
