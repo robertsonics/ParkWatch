@@ -142,7 +142,7 @@ export default function App() {
       <header className="pw-topbar">
         <div className="pw-brand">
           <div className="pw-title">ParkWatch</div>
-          <div className="pw-subtitle">Florida • Flood risk visualization</div>
+          <div className="pw-subtitle">Florida Mobile Home Community Risk Visualization</div>
         </div>
       </header>
 
