@@ -180,7 +180,10 @@ export default function App() {
                   onClick={() => selectPark(p, "list")}
                 >
                   <div className="pw-rowMain">
-                    <div className="pw-rowName">{p.park_name ?? "Unnamed park"}</div>
+                    {/*} <div className="pw-rowName">{p.park_name ?? "Unnamed park"}</div>*/}
+                    <div className="pw-rowName" style={{ color: tierColor(tier) }}>
+                      {p.park_name ?? "Unnamed park"}
+                    </div>
                     <div className="pw-rowSub">
                       {p.park_city ?? ""}
                       {p.park_city && (p.park_address ? " • " : "")}
@@ -188,7 +191,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className={`pw-badge ${tier}`}>{tier.toUpperCase()}</div>
+                  {/*<div className={`pw-badge ${tier}`}>{tier.toUpperCase()}</div>*/}
                 </button>
               );
             })}
