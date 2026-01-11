@@ -31,6 +31,12 @@ function floodTier(flood_risk) {
   return "green";
 }
 
+function tierColor(tier) {
+  if (tier === "green") return "#22c55e";
+  if (tier === "red") return "#ef4444";
+  return "#eab308";
+}
+
 export default function App() {
   const [parks, setParks] = useState([]); // array of rows from Neon
   const [selectedId, setSelectedId] = useState(null); // null until user selects
