@@ -214,7 +214,7 @@ export default function App() {
 
           {!selectedPark ? (
             <div className="pw-empty">
-              Select a park from the map or list. The map will only zoom after you select.
+              Select a park from the map or list.
             </div>
           ) : (
             <ParkDetails park={selectedPark} />
