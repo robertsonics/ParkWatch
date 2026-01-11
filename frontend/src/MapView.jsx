@@ -163,8 +163,8 @@ export default function MapView({ parks, selectedId, onSelect }) {
               const c = tierColor(selectedTier);
               return {
                 color: c,
-                weight: 3,
-                opacity: 0.95,
+                weight: 1.5,
+                opacity: 0.75,
                 fillColor: c,
                 fillOpacity: 0.12,
               };
