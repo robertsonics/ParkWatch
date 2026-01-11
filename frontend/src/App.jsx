@@ -37,6 +37,12 @@ function tierColor(tier) {
   return "#eab308";
 }
 
+function tierLabel(tier) {
+  if (tier === "green") return "LOW";
+  if (tier === "red") return "HIGH";
+  return "MEDIUM";
+}
+
 export default function App() {
   const [parks, setParks] = useState([]); // array of rows from Neon
   const [selectedId, setSelectedId] = useState(null); // null until user selects
@@ -226,7 +232,8 @@ function ParkDetails({ park }) {
     <div className="pw-detailBody">
       <div className="pw-detailTitleRow">
         <div className="pw-detailTitle">{park.park_name ?? "Unnamed park"}</div>
-        <div className={`pw-badge ${tier}`}>{tier.toUpperCase()}</div>
+        {/*<div className={`pw-badge ${tier}`}>{tier.toUpperCase()}</div>*/}
+        <div className={`pw-badge ${tier}`}>{tierLabel(tier)}</div>
       </div>
 
       <div className="pw-kv">
